@@ -1,0 +1,9 @@
+models/
+target/
+openimagephotoobjects.db
+photoobjects.db
+sqldiff.exe
+sqlite3.def
+sqlite3.dll
+sqlite3.exe
+sqlite3_analyzer.exe
