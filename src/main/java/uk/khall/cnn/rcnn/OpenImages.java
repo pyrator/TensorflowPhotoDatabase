@@ -1,6 +1,12 @@
 package uk.khall.cnn.rcnn;
 
 
+import ch.qos.logback.classic.Logger;
+import org.slf4j.LoggerFactory;
+import org.tensorflow.Result;
+import org.tensorflow.TensorFunction;
+import org.tensorflow.op.core.ExpandDims;
+import org.tensorflow.op.image.NonMaxSuppression;
 import org.tensorflow.op.image.ResizeBilinear;
 import uk.khall.imagenet.OpenImagesClasses;
 import uk.khall.sql.SqlLiteBridge;
@@ -45,6 +51,10 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+/**
+ * ]
+ * Detector using the https://tfhub.dev/google/faster_rcnn/openimages_v4/nception_resnet_v2 hub module
+ */
 public class OpenImages implements Detector {
     private static boolean resize = false;
 
@@ -58,14 +68,16 @@ public class OpenImages implements Detector {
     private static final String urlStart = "https://tfhub.dev/google/faster_rcnn/openimages_v4";
     private static final String modelName = "inception_resnet_v2";
     private static final String version = "1";
-    public OpenImages() {
 
+    public OpenImages() {
+        Logger stdOutLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("uk.khall.cnn.rcnn.OpenImages");
+        stdOutLogger.debug("Testing std out logger");
         //https://tfhub.dev/google/faster_rcnn/openimages_v4/inception_resnet_v2/1
         // get path to model folder (currently in resources
-        String modelPath = modelFolder+"/"+modelName;
+        String modelPath = modelFolder + "/" + modelName;
         try {
-            if (!new File(modelPath).exists()){
-                ModelHubUtils.extractTarGZ(urlStart,modelName,modelFolder,version);
+            if (!new File(modelPath).exists()) {
+                ModelHubUtils.extractTarGZ(urlStart, modelName, modelFolder, version);
             }
         } catch (IOException e) {
             e.printStackTrace();
@@ -78,6 +90,13 @@ public class OpenImages implements Detector {
         imageNetTreeMap = imageNetClass.getOpenImageTreeMap();
     }
 
+    /**
+     * load the model intp memory.
+     *
+     * @param dir  directory of the model.
+     * @param tags declared tags.
+     * @return a SavedModelBundle.
+     */
     private SavedModelBundle loadModel(String dir, String[] tags) {
         //Set gpu memory growth to 80%
         GPUOptions gpu = ConfigProto.getDefaultInstance().getGpuOptions().toBuilder() //
@@ -101,10 +120,20 @@ public class OpenImages implements Detector {
         return loader.withConfigProto(configProto).load();
     }
 
+    /**
+     * Set connection to the database.
+     *
+     * @param connection database conection.
+     */
     public void setConnection(Connection connection) {
         this.connection = connection;
     }
 
+    /**
+     * Do object detection on image.
+     *
+     * @param imagePath path to image.
+     */
     public void doObjectDetection(String imagePath) {
 
         try (Graph g = new Graph(); Session s = new Session(g)) {
@@ -121,8 +150,8 @@ public class OpenImages implements Detector {
                 Shape imageShape = outputImage.shape();
                 long[] shapeArray = imageShape.asArray();
                 Reshape<TFloat32> reshape = tf.reshape(tf.math.div(
-                        tf.dtypes.cast(tf.constant(outputImage), TFloat32.class),
-                        tf.constant(255.0f)
+                                tf.dtypes.cast(tf.constant(outputImage), TFloat32.class),
+                                tf.constant(255.0f)
                         ),
                         tf.array(1,
                                 shapeArray[0],
@@ -137,47 +166,43 @@ public class OpenImages implements Detector {
                     try {
                         long imageId = insertImageIntoDatabase(imageFile.getCanonicalPath(), shapeArray);
                         if (imageId != nullId) {
-                            Map<String, Tensor> outputTensorMap = model.function("default").call(feedDict);
-
-                            //detection_classes, detectionBoxes model output names
-
-                            try (TString detectionClasses = (TString) outputTensorMap.get("detection_class_entities");
-                                 TFloat32 detectionBoxes = (TFloat32) outputTensorMap.get("detection_boxes");
-                                 TInt64 detectionClassLabels = (TInt64) outputTensorMap.get("detection_class_labels");
-                                 TString detectionClassNames = (TString) outputTensorMap.get("detection_class_names");
-                                 TFloat32 detectionScores = (TFloat32) outputTensorMap.get("detection_scores")
-                            ) {
+                            TensorFunction serving = model.function("default");
+                            try (Result result = serving.call(feedDict);
+                                 //detection_classes, detectionBoxes etc. are model output names
+                                 TString detectionClasses = (TString) result.get("detection_class_entities").orElseThrow(Exception::new);
+                                 TFloat32 detectionBoxes = (TFloat32) result.get("detection_boxes").orElseThrow(Exception::new);
+                                 TInt64 detectionClassLabels = (TInt64) result.get("detection_class_labels").orElseThrow(Exception::new);
+                                 TString detectionClassNames = (TString) result.get("detection_class_names").orElseThrow(Exception::new);
+                                 TFloat32 detectionScores = (TFloat32) result.get("detection_scores").orElseThrow(Exception::new)) {
                                 int numDetects = (int) detectionClasses.size();
-                                /*      //Create a combinedNonMaxSuppression
-                                        ExpandDims<TFloat32> reshapeBoxes = tf.expandDims(tf.constant(detectionBoxes), tf.constant(0));
-                                        ExpandDims<TFloat32> reshapeScore = tf.expandDims(tf.constant(detectionScores), tf.constant(0));
-                                        try (TFloat32 reshapeDetectBoxes = (TFloat32) s.runner().fetch(reshapeBoxes).run().get(0);
-                                             TFloat32 reshapeDetectScores = (TFloat32) s.runner().fetch(reshapeScore).run().get(0)) {
-                                            CombinedNonMaxSuppression.Options clipBoxes = CombinedNonMaxSuppression.clipBoxes(false);
-                                            CombinedNonMaxSuppression combinedNonMaxSuppression = tf.image.combinedNonMaxSuppression(tf.constant(reshapeDetectBoxes),
-                                                    tf.constant(reshapeDetectScores), tf.constant(10), tf.constant(10),
-                                                    tf.constant(0.5f), tf.constant(0.5f),
-                                                    clipBoxes);
+                                //Create a NonMaxSuppression
+                                if (numDetects > 0) {
+                                    NonMaxSuppression.Options padToMaxOutputSize = NonMaxSuppression.padToMaxOutputSize(false);
+                                    NonMaxSuppression nonMaxSuppression = tf.image.nonMaxSuppression(tf.constant(detectionBoxes),
+                                            tf.constant(detectionScores), tf.constant(10),
+                                            tf.constant(0.5f), tf.constant(0.5f), tf.constant(0.0f),
+                                            padToMaxOutputSize);
 
-                                            try (TFloat32 nmsedBoxes = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedBoxes()).run().get(0);
-                                                 TFloat32 nmsedScores = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedScores()).run().get(0);
-                                                 TFloat32 nmsedClasses = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedClasses()).run().get(0);
-                                                 TInt32 validDetections = (TInt32) s.runner().fetch(combinedNonMaxSuppression.validDetections()).run().get(0)) {
+                                    try (TInt32 selectedIndices = (TInt32) s.runner().fetch(nonMaxSuppression.selectedIndices()).run().get(0);
+                                         TFloat32 selectedScores = (TFloat32) s.runner().fetch(nonMaxSuppression.selectedScores()).run().get(0);
+                                         TInt32 validDetections = (TInt32) s.runner().fetch(nonMaxSuppression.validOutputs()).run().get(0)) {
 
+                                        for (int n = 0; n < selectedIndices.size(); n++) {
+                                            Integer selectedIndex = selectedIndices.getInt(n);
+                                            float detectionScore = selectedScores.getFloat(n);
+                                            Long classLabel = detectionClassLabels.getLong(selectedIndex);
+                                            //only include those classes with detection score greater than 0.3f
+                                            if (detectionScore > detectionCutOff) {
+                                                FloatNdArray detectionBox = detectionBoxes.get(selectedIndices.getInt(n));
+                                                //add class name to temp bufferedimage
+                                                insertClassesIntoDatabase(imageId, classLabel, detectionBox, detectionScore);
                                             }
-                                        }*/
-                                for (int n = 0; n < numDetects; n++) {
-                                    Long classLabel = detectionClassLabels.getLong(n);
-                                    //System.out.println(openImagesTreeMap.get(classLabel));
-                                    //put probability and position in outputMap
-                                    float detectionScore = detectionScores.getFloat(n);
-                                    //only include those classes with detection score greater than 0.3f
-                                    if (detectionScore > detectionCutOff) {
-                                        FloatNdArray detectionBox = detectionBoxes.get(n);
-                                        //add class name to temp bufferedimage
-                                        insertClassesIntoDatabase(imageId, classLabel, detectionBox, detectionScore);
+                                        }
                                     }
                                 }
+
+                            } catch (Exception e) {
+                                e.printStackTrace();
                             }
                         }
                     } catch (IOException e) {
@@ -188,17 +213,29 @@ public class OpenImages implements Detector {
         }
 
     }
-    public void doResisizedObjectDetection(String imagePath){
+
+    /**
+     * Resize object before detection.
+     *
+     * @param imagePath path to image.
+     */
+    public void doResisizedObjectDetection(String imagePath) {
         doResisizedObjectDetection(imagePath, imgRcnnSize, imgRcnnSize);
     }
+
+    /**
+     * Resize object before detection.
+     *
+     * @param imagePath path to image.
+     * @param newHeight new height of object.
+     * @param newWidth  new width of object.
+     */
     public void doResisizedObjectDetection(String imagePath, int newHeight, int newWidth) {
 
         try (Graph g = new Graph(); Session s = new Session(g)) {
 
             Ops tf = Ops.create(g);
             Constant<TString> fileName = tf.constant(imagePath);
-            //Constant<TString> fileName = tf.constant(LoadBirdSearchModel.class.getClassLoader().
-            // getResource(imagePath).getPath());
             ReadFile readFile = tf.io.readFile(fileName);
 
             Session.Runner runner = s.runner();
@@ -209,35 +246,13 @@ public class OpenImages implements Detector {
                 Map<String, Tensor> feedDict = new HashMap<>();
                 Shape imageShape = outputImage.shape();
                 long[] shapeArray = imageShape.asArray();
-
-                //int newHeight = (int) (shapeArray[0] / 4);
-                //int newWidth = (int) (shapeArray[1] / 4);
                 //create a 4D tensor of shape `[num_boxes, crop_height, crop_width, depth]`
                 try (TUint8 reshapedOutput = reshapeTensor(outputImage)) {
                     //resize image to 299 x 299 assuming whole of original image
                     Operand<TUint8> inputImage = tf.constant(reshapedOutput);
-                                        /*
-                    //2D tensor of shape `[num_boxes, 4]` - This uses the full image
-                    Operand<TFloat32> boxes = tf.constant(new float[][]{{0.0f, 0.0f, 1.0f, 1.0f}});
-                    //A A 1-D tensor of shape `[num_boxes]`
-                    Operand<TInt32> boxInd = tf.constant(new int[]{0});
-
-                    //A 1-D tensor of 2 elements, `size = [crop_height, crop_width]`
-                    // Its possible to create a tensor like this
-
-                    TInt32 cropTensor = TInt32.vectorOf(imgSize, imgSize);
-                    Operand<TInt32> cropSize = tf.constant(cropTensor);
-
-                    //or use an array
-                    //Operand<TInt32> cropSize = tf.constant(new int[]{newHeight, newWidth});
-                    //CropAndResize options - default is bilinear anyway
-                    CropAndResize.Options cropOptions = CropAndResize.method("bilinear");
-                    CropAndResize cropAndResizeImage = tf.image.cropAndResize(inputImage, boxes, boxInd, cropSize,
-                            cropOptions);
-                    //looks like CropAndResize casts image to a TFloat32*/
                     ResizeBilinear.Options halfPixelCenters = ResizeBilinear.halfPixelCenters(true);
                     Operand<TInt32> reSize = tf.constant(new int[]{newHeight, newWidth});
-                    ResizeBilinear resizeBilinear = tf.image.resizeBilinear(inputImage,reSize,halfPixelCenters );
+                    ResizeBilinear resizeBilinear = tf.image.resizeBilinear(inputImage, reSize, halfPixelCenters);
                     try (TFloat32 cropVal = (TFloat32) s.runner().fetch(resizeBilinear).run().get(0)) {
                         //The given SavedModel SignatureDef input
                         Div<TFloat32> divPhoto = tf.math.div(
@@ -250,46 +265,41 @@ public class OpenImages implements Detector {
                             try {
                                 long imageId = insertImageIntoDatabase(imageFile.getCanonicalPath(), shapeArray);
                                 if (imageId != nullId) {
-                                    Map<String, Tensor> outputTensorMap = model.function("default").call(feedDict);
-
-                                    //detection_class_entities, detection_boxes model output names
-                                    try (TString detectionClasses = (TString) outputTensorMap.get("detection_class_entities");
-                                         TFloat32 detectionBoxes = (TFloat32) outputTensorMap.get("detection_boxes");
-                                         TInt64 detectionClassLabels = (TInt64) outputTensorMap.get("detection_class_labels");
-                                         TString detectionClassNames = (TString) outputTensorMap.get("detection_class_names");
-                                         TFloat32 detectionScores = (TFloat32) outputTensorMap.get("detection_scores")
-                                    ) {
+                                    TensorFunction serving = model.function("default");
+                                    try (Result result = serving.call(feedDict);
+                                         //detection_classes, detectionBoxes etc. are model output names
+                                         TString detectionClasses = (TString) result.get("detection_class_entities").orElseThrow(Exception::new);
+                                         TFloat32 detectionBoxes = (TFloat32) result.get("detection_boxes").orElseThrow(Exception::new);
+                                         TInt64 detectionClassLabels = (TInt64) result.get("detection_class_labels").orElseThrow(Exception::new);
+                                         TString detectionClassNames = (TString) result.get("detection_class_names").orElseThrow(Exception::new);
+                                         TFloat32 detectionScores = (TFloat32) result.get("detection_scores").orElseThrow(Exception::new)) {
                                         int numDetects = (int) detectionClasses.size();
-/*                                        //Create a combinedNonMaxSuppression
-                                        ExpandDims<TFloat32> reshapeBoxes = tf.expandDims(tf.constant(detectionBoxes), tf.constant(0));
-                                        ExpandDims<TFloat32> reshapeScore = tf.expandDims(tf.constant(detectionScores), tf.constant(0));
-                                        try (TFloat32 reshapeDetectBoxes = (TFloat32) s.runner().fetch(reshapeBoxes).run().get(0);
-                                             TFloat32 reshapeDetectScores = (TFloat32) s.runner().fetch(reshapeScore).run().get(0)) {
-                                            CombinedNonMaxSuppression.Options clipBoxes = CombinedNonMaxSuppression.clipBoxes(false);
-                                            CombinedNonMaxSuppression combinedNonMaxSuppression = tf.image.combinedNonMaxSuppression(tf.constant(reshapeDetectBoxes),
-                                                    tf.constant(reshapeDetectScores), tf.constant(10), tf.constant(10),
-                                                    tf.constant(0.5f), tf.constant(0.5f),
-                                                    clipBoxes);
+                                        if (numDetects > 0) {
+                                            NonMaxSuppression.Options padToMaxOutputSize = NonMaxSuppression.padToMaxOutputSize(false);
+                                            NonMaxSuppression nonMaxSuppression = tf.image.nonMaxSuppression(tf.constant(detectionBoxes),
+                                                    tf.constant(detectionScores), tf.constant(10),
+                                                    tf.constant(0.5f), tf.constant(0.5f), tf.constant(0.0f),
+                                                    padToMaxOutputSize);
 
-                                            try (TFloat32 nmsedBoxes = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedBoxes()).run().get(0);
-                                                 TFloat32 nmsedScores = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedScores()).run().get(0);
-                                                 TFloat32 nmsedClasses = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedClasses()).run().get(0);
-                                                 TInt32 validDetections = (TInt32) s.runner().fetch(combinedNonMaxSuppression.validDetections()).run().get(0)) {
-
-                                            }
-                                        }*/
-                                        for (int n = 0; n < numDetects; n++) {
-                                            Long classLabel = detectionClassLabels.getLong(n);
-                                            //System.out.println(openImagesTreeMap.get(classLabel));
-                                            //put probability and position in outputMap
-                                            float detectionScore = detectionScores.getFloat(n);
-                                            //only include those classes with detection score greater than 0.3f
-                                            if (detectionScore > 0.3f) {
-                                                FloatNdArray detectionBox = detectionBoxes.get(n);
-                                                //add class name to temp bufferedimage
-                                                insertClassesIntoDatabase(imageId, classLabel, detectionBox, detectionScore);
+                                            try (TInt32 selectedIndices = (TInt32) s.runner().fetch(nonMaxSuppression.selectedIndices()).run().get(0);
+                                                 TFloat32 selectedScores = (TFloat32) s.runner().fetch(nonMaxSuppression.selectedScores()).run().get(0);
+                                                 TInt32 validDetections = (TInt32) s.runner().fetch(nonMaxSuppression.validOutputs()).run().get(0)) {
+                                                //Gather??
+                                                for (int n = 0; n < selectedIndices.size(); n++) {
+                                                    Integer selectedIndex = selectedIndices.getInt(n);
+                                                    float detectionScore = selectedScores.getFloat(n);
+                                                    Long classLabel = detectionClassLabels.getLong(selectedIndex);
+                                                    //only include those classes with detection score greater than 0.3f
+                                                    if (detectionScore > detectionCutOff) {
+                                                        FloatNdArray detectionBox = detectionBoxes.get(selectedIndices.getInt(n));
+                                                        //add class name to temp bufferedimage
+                                                        insertClassesIntoDatabase(imageId, classLabel, detectionBox, detectionScore);
+                                                    }
+                                                }
                                             }
                                         }
+                                    } catch (Exception e) {
+                                        e.printStackTrace();
                                     }
                                 }
                             } catch (IOException e) {
@@ -302,6 +312,13 @@ public class OpenImages implements Detector {
         }
     }
 
+    /**
+     * Insert image details into the database
+     *
+     * @param imageName  full name and path to image
+     * @param shapeArray width and height
+     * @return the new id
+     */
     public long insertImageIntoDatabase(String imageName, long[] shapeArray) {
         PreparedStatement pstmt = null;
         long imageId = nullId;
@@ -329,6 +346,14 @@ public class OpenImages implements Detector {
         return imageId;
     }
 
+    /**
+     * Insert object detection details into database
+     *
+     * @param imageId      id of the image
+     * @param classId      class id of the image
+     * @param detectionBox the detection box
+     * @param score        associated detection score
+     */
     public void insertClassesIntoDatabase(long imageId, float classId, FloatNdArray detectionBox, float score) {
         PreparedStatement pstmt = null;
         try {
@@ -355,10 +380,17 @@ public class OpenImages implements Detector {
         }
     }
 
+    /**
+     * main class
+     *
+     * @param params
+     * @throws SQLException
+     * @throws IOException
+     */
     public static void main(String[] params) throws SQLException, IOException {
         OpenImages lfr = new OpenImages();
-        boolean doResize=false;
-        String dirName = "C:\\Users\\????????????";
+        boolean doResize = false;
+        String dirName = "D:\\Users\\theke\\Pictures\\Wallington with Eli April 2022\\";
         try (Connection connection = SqlLiteBridge.createSqliteConnection("openimagephotoobjects.db");
              Stream<Path> stream = Files.walk(Paths.get(dirName), 1)
         ) {
@@ -371,7 +403,7 @@ public class OpenImages implements Detector {
             for (String imagePath : fileSet) {
                 if (imagePath.toLowerCase().endsWith(".jpg")) {
                     if (doResize)
-                        lfr.doResisizedObjectDetection(dirName+imagePath, 1024, 1024);
+                        lfr.doResisizedObjectDetection(dirName + imagePath, 1024, 1024);
                     else
                         lfr.doObjectDetection(dirName + imagePath);
                 }

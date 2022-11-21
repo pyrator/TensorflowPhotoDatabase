@@ -99,12 +99,12 @@ public class OpenImageJdbiUtils {
                 System.out.println(folder + " : " + file);
             }*/
         }
-        String folder = "D:\\Users\\theke\\Pictures\\Allen Banks Mar 2020\\";
+        String folder = "D:\\Users\\theke\\Pictures\\Wallington with Eli April 2022\\";
         ArrayList<String> files = getFilenamesInFolder(folder);
         for (String file : files ){
             System.out.println(folder + " : " + file);
         }
-        ArrayList<PhotoObjectProperties> properties = getPhotObjectProperties("D:\\Users\\theke\\Pictures\\Allen Banks Mar 2020\\P1000728.JPG");
+        ArrayList<PhotoObjectProperties> properties = getPhotObjectProperties(folder + "P1040095.JPG");
         for (PhotoObjectProperties property : properties){
             System.out.println(property);
         }

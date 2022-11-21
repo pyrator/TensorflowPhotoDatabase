@@ -1,5 +1,7 @@
 package uk.khall.cnn.rcnn;
 
+import org.tensorflow.op.core.ExpandDims;
+import org.tensorflow.op.image.CombinedNonMaxSuppression;
 import uk.khall.coco.CocoClasses;
 import uk.khall.sql.SqlLiteBridge;
 import org.tensorflow.*;
@@ -115,7 +117,14 @@ public class FasterRcnn implements Detector {
                     try {
                         long imageId = insertImageIntoDatabase(imageFile.getCanonicalPath(), shapeArray);
                         if (imageId != nullId) {
-                            Map<String, Tensor> outputTensorMap = model.function("serving_default").call(feedDict);
+                            TensorFunction serving = model.function("serving_default");
+                            try (Result result = serving.call(feedDict);
+                                 //detection_classes, detectionBoxes etc. are model output names
+                                 TFloat32 detectionClasses = (TFloat32) result.get("detection_classes").orElseThrow(Exception::new);
+                                 TFloat32 detectionBoxes = (TFloat32) result.get("detection_boxes").orElseThrow(Exception::new);
+                                 TFloat32 numDetections = (TFloat32) result.get("num_detections").orElseThrow(Exception::new);
+                                 TFloat32 detectionScores = (TFloat32) result.get("detection_scores").orElseThrow(Exception::new)) {
+/*                            Map<String, Tensor> outputTensorMap = model.function("serving_default").call(feedDict);
                             //detection_classes, detectionBoxes model output names
                             try (TFloat32 detectionClasses = (TFloat32) outputTensorMap.get("detection_classes");
                                  TFloat32 detectionBoxes = (TFloat32) outputTensorMap.get("detection_boxes");
@@ -124,20 +133,38 @@ public class FasterRcnn implements Detector {
                                  TFloat32 detectionScores = (TFloat32) outputTensorMap.get("detection_scores");
                                  TFloat32 rawDetectionScores = (TFloat32) outputTensorMap.get("raw_detection_scores");
                                  TFloat32 detectionAnchorIndices = (TFloat32) outputTensorMap.get("detection_anchor_indices");
-                                 TFloat32 detectionMulticlassScores = (TFloat32) outputTensorMap.get("detection_multiclass_scores")) {
+                                 TFloat32 detectionMulticlassScores = (TFloat32) outputTensorMap.get("detection_multiclass_scores")) {*/
                                 int numDetects = (int) numDetections.getFloat(0);//System.out.println("numDetections  " + );
 
                                 if (numDetects > 0) {
-                                    for (int n = 0; n < numDetects; n++) {
-                                        //put probability and position in outputMap
-                                        float detectionScore = detectionScores.getFloat(0, n);
-                                        float classVal = detectionClasses.getFloat(0, n);
-                                        if (detectionScore > detectionCutOff) {
-                                            FloatNdArray detectionBox = detectionBoxes.get(0, n);
-                                            insertClassesIntoDatabase(imageId, classVal, detectionBox, detectionScore);
+                                    ExpandDims<TFloat32> reshapeBoxes = tf.expandDims(tf.constant(detectionBoxes), tf.constant(0));
+                                    ExpandDims<TFloat32> reshapeScore = tf.expandDims(tf.constant(detectionScores), tf.constant(0));
+                                    try (TFloat32 reshapeDetectBoxes = (TFloat32) s.runner().fetch(reshapeBoxes).run().get(0);
+                                         TFloat32 reshapeDetectScores = (TFloat32) s.runner().fetch(reshapeScore).run().get(0)) {
+                                        CombinedNonMaxSuppression.Options clipBoxes = CombinedNonMaxSuppression.clipBoxes(false);
+                                        CombinedNonMaxSuppression combinedNonMaxSuppression = tf.image.combinedNonMaxSuppression(tf.constant(reshapeDetectBoxes),
+                                                tf.constant(reshapeDetectScores), tf.constant(2), tf.constant(10),
+                                                tf.constant(0.5f), tf.constant(0.5f),
+                                                clipBoxes);
+                                        //Create a combinedNonMaxSuppression
+                                        try (TFloat32 nmsedBoxes = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedBoxes()).run().get(0);
+                                             TFloat32 nmsedScores = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedScores()).run().get(0);
+                                             TFloat32 nmsedClasses = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedClasses()).run().get(0);
+                                             TInt32 validDetections = (TInt32) s.runner().fetch(combinedNonMaxSuppression.validDetections()).run().get(0)) {
+                                            for (int n = 0; n < validDetections.getInt(0); n++) {
+                                                //put probability and position in outputMap
+                                                float detectionScore = nmsedScores.getFloat(0, n);
+                                                float classVal = detectionClasses.getFloat(0,(int)nmsedClasses.getFloat(0, n));
+                                                if (detectionScore > detectionCutOff) {
+                                                    FloatNdArray detectionBox = nmsedBoxes.get(0, n);
+                                                    insertClassesIntoDatabase(imageId, classVal, detectionBox, detectionScore);
+                                                }
+                                            }
                                         }
                                     }
                                 }
+                            } catch (Exception e) {
+                                e.printStackTrace();
                             }
                         }
                     } catch (IOException e) {
@@ -201,7 +228,14 @@ public class FasterRcnn implements Detector {
                             try {
                                 long imageId = insertImageIntoDatabase(imageFile.getCanonicalPath(), shapeArray);
                                 if (imageId != nullId) {
-                                    Map<String, Tensor> outputTensorMap = model.function("serving_default").call(feedDict);
+                                    TensorFunction serving = model.function("serving_default");
+                                    try (Result result = serving.call(feedDict);
+                                         //detection_classes, detectionBoxes etc. are model output names
+                                         TFloat32 detectionClasses = (TFloat32) result.get("detection_classes").orElseThrow(Exception::new);
+                                         TFloat32 detectionBoxes = (TFloat32) result.get("detection_boxes").orElseThrow(Exception::new);
+                                         TFloat32 numDetections = (TFloat32) result.get("num_detections").orElseThrow(Exception::new);
+                                         TFloat32 detectionScores = (TFloat32) result.get("detection_scores").orElseThrow(Exception::new)) {
+/*                                    Map<String, Tensor> outputTensorMap = model.function("serving_default").call(feedDict);
                                     //detection_classes, detectionBoxes model output names
                                     try (TFloat32 detectionClasses = (TFloat32) outputTensorMap.get("detection_classes");
                                          TFloat32 detectionBoxes = (TFloat32) outputTensorMap.get("detection_boxes");
@@ -210,16 +244,32 @@ public class FasterRcnn implements Detector {
                                          TFloat32 detectionScores = (TFloat32) outputTensorMap.get("detection_scores");
                                          TFloat32 rawDetectionScores = (TFloat32) outputTensorMap.get("raw_detection_scores");
                                          TFloat32 detectionAnchorIndices = (TFloat32) outputTensorMap.get("detection_anchor_indices");
-                                         TFloat32 detectionMulticlassScores = (TFloat32) outputTensorMap.get("detection_multiclass_scores")) {
+                                         TFloat32 detectionMulticlassScores = (TFloat32) outputTensorMap.get("detection_multiclass_scores")) {*/
                                         int numDetects = (int) numDetections.getFloat(0);//System.out.println("numDetections  " + );
                                         if (numDetects > 0) {
-                                            for (int n = 0; n < numDetects; n++) {
-                                                //put probability and position in outputMap
-                                                float detectionScore = detectionScores.getFloat(0, n);
-                                                float classVal = detectionClasses.getFloat(0, n);
-                                                if (detectionScore > detectionCutOff) {
-                                                    FloatNdArray detectionBox = detectionBoxes.get(0, n);
-                                                    insertClassesIntoDatabase(imageId, classVal, detectionBox, detectionScore);
+                                            ExpandDims<TFloat32> reshapeBoxes = tf.expandDims(tf.constant(detectionBoxes), tf.constant(0));
+                                            ExpandDims<TFloat32> reshapeScore = tf.expandDims(tf.constant(detectionScores), tf.constant(0));
+                                            try (TFloat32 reshapeDetectBoxes = (TFloat32) s.runner().fetch(reshapeBoxes).run().get(0);
+                                                 TFloat32 reshapeDetectScores = (TFloat32) s.runner().fetch(reshapeScore).run().get(0)) {
+                                                CombinedNonMaxSuppression.Options clipBoxes = CombinedNonMaxSuppression.clipBoxes(false);
+                                                CombinedNonMaxSuppression combinedNonMaxSuppression = tf.image.combinedNonMaxSuppression(tf.constant(reshapeDetectBoxes),
+                                                        tf.constant(reshapeDetectScores), tf.constant(2), tf.constant(10),
+                                                        tf.constant(0.5f), tf.constant(0.5f),
+                                                        clipBoxes);
+                                                //Create a combinedNonMaxSuppression
+                                                try (TFloat32 nmsedBoxes = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedBoxes()).run().get(0);
+                                                     TFloat32 nmsedScores = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedScores()).run().get(0);
+                                                     TFloat32 nmsedClasses = (TFloat32) s.runner().fetch(combinedNonMaxSuppression.nmsedClasses()).run().get(0);
+                                                     TInt32 validDetections = (TInt32) s.runner().fetch(combinedNonMaxSuppression.validDetections()).run().get(0)) {
+                                                    for (int n = 0; n < validDetections.getInt(0); n++) {
+                                                        //put probability and position in outputMap
+                                                        float detectionScore = nmsedScores.getFloat(0, n);
+                                                        float classVal = detectionClasses.getFloat(0,(int)nmsedClasses.getFloat(0, n));
+                                                        if (detectionScore > detectionCutOff) {
+                                                            FloatNdArray detectionBox = nmsedBoxes.get(0, n);
+                                                            insertClassesIntoDatabase(imageId, classVal, detectionBox, detectionScore);
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -229,6 +279,8 @@ public class FasterRcnn implements Detector {
                                 e.printStackTrace();
                             }
                         }
+                    } catch (Exception e) {
+                        e.printStackTrace();
                     }
                 }
             }
@@ -291,7 +343,7 @@ public class FasterRcnn implements Detector {
 
     public static void main(String[] params) throws SQLException, IOException {
         FasterRcnn lfr = new FasterRcnn();
-        String dirName = "C:\\Users\\????????????";
+        String dirName = "D:\\Users\\theke\\Pictures\\Pickering Sept 2022\\";
         boolean doResize=true;
         try (Connection connection = SqlLiteBridge.createSqliteConnection("photoobjects.db");
 
