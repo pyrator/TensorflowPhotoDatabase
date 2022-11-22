@@ -18,8 +18,13 @@ public class CreateOpenImagePhotoDatabase {
             Statement stmt = connection.createStatement();
             stmt.executeUpdate("DROP TABLE IF EXISTS images");
             stmt.close();
-            stmt.executeUpdate("CREATE TABLE images(imageid INTEGER PRIMARY KEY AUTOINCREMENT," +
-                    " imagename TEXT NOT NULL , width INTEGER NOT NULL, height INTEGER NOT NULL ) ");
+            stmt.executeUpdate("""
+                    CREATE TABLE images(
+                    imageid INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    imagename TEXT NOT NULL , 
+                    width INTEGER NOT NULL, 
+                    height INTEGER NOT NULL ) 
+                    """);
             stmt.close();
             stmt.executeUpdate("DROP TABLE IF EXISTS openimageclass");
             stmt.close();
@@ -37,30 +42,42 @@ public class CreateOpenImagePhotoDatabase {
             pstmt.close();
             stmt.executeUpdate("DROP TABLE IF EXISTS openimagephotoobjects");
             stmt.close();
-            stmt.executeUpdate("CREATE TABLE openimagephotoobjects( id NUMBER NOT NULL, imageid INTEGER NOT NULL, x1 REAL, y1 REAL, x2 REAL, y2 REAL, score REAL ) ");
+            stmt.executeUpdate("CREATE TABLE openimagephotoobjects" +
+                    "( " +
+                    "id NUMBER NOT NULL, " +
+                    "imageid INTEGER NOT NULL, " +
+                    "x1 REAL, " +
+                    "y1 REAL, " +
+                    "x2 REAL, " +
+                    "y2 REAL, " +
+                    "score REAL, " +
+                    "FOREIGN KEY (imageid) " +
+                    "REFERENCES images (imageid) " +
+                    "ON DELETE CASCADE );");
             stmt.close();
-            //stmt.executeUpdate("DROP VIEW IF EXISTS ClassTotals");
-            //stmt.close();
-            stmt.executeUpdate("CREATE VIEW IF NOT EXISTS ClassTotals (total, className) \n" +
-                    "AS \n" +
-                    "select \n" +
-                    "count(images.imagename) as total, \n" +
-                    "openimageclass.openimageclassname \n" +
-                    "from images\n" +
-                    "join openimagephotoobjects on openimagephotoobjects.imageid = images.imageid \n" +
-                    "join openimageclass on openimageclass.id = openimagephotoobjects.id \n" +
-                    "group by openimageclass.openimageclassname");
+            stmt.executeUpdate("""
+                    CREATE VIEW IF NOT EXISTS ClassTotals (total, className) 
+                    AS 
+                    select 
+                    count(images.imagename) as total, 
+                    openimageclass.openimageclassname 
+                    from images 
+                    join openimagephotoobjects on openimagephotoobjects.imageid = images.imageid 
+                    join openimageclass on openimageclass.id = openimagephotoobjects.id 
+                    group by openimageclass.openimageclassname
+                    """);
             stmt.close();
-            //stmt.executeUpdate("DROP VIEW IF EXISTS ClassFile");
-            //stmt.close();
-            stmt.executeUpdate("CREATE VIEW IF NOT EXISTS ClassFile (imageName, className) \n" +
-                    "AS \n" +
-                    "select \n" +
-                    "images.imagename, \n" +
-                    "openimageclass.openimageclassname \n" +
-                    "from images\n" +
-                    "join openimagephotoobjects on openimagephotoobjects.imageid = images.imageid \n" +
-                    "join openimageclass on openimageclass.id = openimagephotoobjects.id"
+            stmt.executeUpdate(
+                    """
+                    CREATE VIEW IF NOT EXISTS ClassFile (imageName, className) 
+                    AS 
+                    select 
+                    images.imagename, 
+                    openimageclass.openimageclassname 
+                    from images 
+                    join openimagephotoobjects on openimagephotoobjects.imageid = images.imageid 
+                    join openimageclass on openimageclass.id = openimagephotoobjects.id
+                    """
                     );
             stmt.close();
         } catch (SQLException throwables) {
@@ -71,5 +88,42 @@ public class CreateOpenImagePhotoDatabase {
         }
     }
 
+    public static void main2(String[] params) {
+        Connection connection;
+        try {
+            connection = SqlLiteBridge.createSqliteConnection("openimagephotoobjects.db");
+            Statement stmt = connection.createStatement();
+            stmt.executeUpdate("""
+                    PRAGMA foreign_keys=off;
+                    
+                    BEGIN TRANSACTION;
+                    
+                    ALTER TABLE openimagephotoobjects RENAME TO _openimagephotoobjects_old;
+                    
+                    CREATE TABLE openimagephotoobjects
+                    ( 
+                    id NUMBER NOT NULL, 
+                    imageid INTEGER NOT NULL, 
+                    x1 REAL, 
+                    y1 REAL, 
+                    x2 REAL, 
+                    y2 REAL, 
+                    score REAL, 
+                    FOREIGN KEY (imageid) REFERENCES images (imageid) ON DELETE CASCADE 
+                    ); 
+                    
+                    INSERT INTO openimagephotoobjects SELECT * FROM _openimagephotoobjects_old;
+                    
+                    COMMIT;
+                    
+                    PRAGMA foreign_keys=on;
+                    """);
+            stmt.close();
+        }catch (SQLException throwables) {
+            throwables.printStackTrace();
+        } finally {
 
+
+        }
+    }
 }

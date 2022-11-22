@@ -2,13 +2,18 @@ package uk.khall.cnn.rcnn;
 
 
 import ch.qos.logback.classic.Logger;
+import org.jdbi.v3.core.Jdbi;
+import org.jdbi.v3.sqlobject.SqlObjectPlugin;
 import org.slf4j.LoggerFactory;
 import org.tensorflow.Result;
 import org.tensorflow.TensorFunction;
-import org.tensorflow.op.core.ExpandDims;
 import org.tensorflow.op.image.NonMaxSuppression;
 import org.tensorflow.op.image.ResizeBilinear;
+import uk.khall.beans.ImageBean;
+import uk.khall.beans.ObjectBean;
 import uk.khall.imagenet.OpenImagesClasses;
+import uk.khall.sql.JdbiBridge;
+import uk.khall.sql.OpenImagesJdbiInterface;
 import uk.khall.sql.SqlLiteBridge;
 import org.tensorflow.Graph;
 import org.tensorflow.Operand;
@@ -31,11 +36,16 @@ import org.tensorflow.types.TInt32;
 import org.tensorflow.types.TInt64;
 import org.tensorflow.types.TString;
 import org.tensorflow.types.TUint8;
+import uk.khall.ui.FileChooser;
+import uk.khall.ui.GUIThread;
 import uk.khall.utils.ModelHubUtils;
 
+import javax.swing.JFrame;
+import javax.swing.SwingUtilities;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -57,7 +67,7 @@ import java.util.stream.Stream;
  */
 public class OpenImages implements Detector {
     private static boolean resize = false;
-
+    Logger stdOutLogger;
     SavedModelBundle model;
     private OpenImagesClasses imageNetClass;
     private TreeMap<Float, String> imageNetTreeMap;
@@ -70,7 +80,7 @@ public class OpenImages implements Detector {
     private static final String version = "1";
 
     public OpenImages() {
-        Logger stdOutLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("uk.khall.cnn.rcnn.OpenImages");
+        stdOutLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("uk.khall.cnn.rcnn.OpenImages");
         stdOutLogger.debug("Testing std out logger");
         //https://tfhub.dev/google/faster_rcnn/openimages_v4/inception_resnet_v2/1
         // get path to model folder (currently in resources
@@ -80,7 +90,7 @@ public class OpenImages implements Detector {
                 ModelHubUtils.extractTarGZ(urlStart, modelName, modelFolder, version);
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            stdOutLogger.error(e.getMessage());
         }
         // load saved model
         model = loadModel(modelPath, new String[0]);
@@ -134,7 +144,7 @@ public class OpenImages implements Detector {
      *
      * @param imagePath path to image.
      */
-    public void doObjectDetection(String imagePath) {
+    public void doObjectDetection(String imagePath, boolean NMS) {
 
         try (Graph g = new Graph(); Session s = new Session(g)) {
             Ops tf = Ops.create(g);
@@ -177,36 +187,51 @@ public class OpenImages implements Detector {
                                 int numDetects = (int) detectionClasses.size();
                                 //Create a NonMaxSuppression
                                 if (numDetects > 0) {
-                                    NonMaxSuppression.Options padToMaxOutputSize = NonMaxSuppression.padToMaxOutputSize(false);
-                                    NonMaxSuppression nonMaxSuppression = tf.image.nonMaxSuppression(tf.constant(detectionBoxes),
-                                            tf.constant(detectionScores), tf.constant(10),
-                                            tf.constant(0.5f), tf.constant(0.5f), tf.constant(0.0f),
-                                            padToMaxOutputSize);
+                                    if (NMS) {
+                                        NonMaxSuppression.Options padToMaxOutputSize = NonMaxSuppression.padToMaxOutputSize(false);
+                                        NonMaxSuppression nonMaxSuppression = tf.image.nonMaxSuppression(tf.constant(detectionBoxes),
+                                                tf.constant(detectionScores), tf.constant(10),
+                                                tf.constant(0.5f), tf.constant(0.5f), tf.constant(0.0f),
+                                                padToMaxOutputSize);
 
-                                    try (TInt32 selectedIndices = (TInt32) s.runner().fetch(nonMaxSuppression.selectedIndices()).run().get(0);
-                                         TFloat32 selectedScores = (TFloat32) s.runner().fetch(nonMaxSuppression.selectedScores()).run().get(0);
-                                         TInt32 validDetections = (TInt32) s.runner().fetch(nonMaxSuppression.validOutputs()).run().get(0)) {
+                                        try (TInt32 selectedIndices = (TInt32) s.runner().fetch(nonMaxSuppression.selectedIndices()).run().get(0);
+                                             TFloat32 selectedScores = (TFloat32) s.runner().fetch(nonMaxSuppression.selectedScores()).run().get(0);
+                                             TInt32 validDetections = (TInt32) s.runner().fetch(nonMaxSuppression.validOutputs()).run().get(0)) {
 
-                                        for (int n = 0; n < selectedIndices.size(); n++) {
-                                            Integer selectedIndex = selectedIndices.getInt(n);
-                                            float detectionScore = selectedScores.getFloat(n);
-                                            Long classLabel = detectionClassLabels.getLong(selectedIndex);
-                                            //only include those classes with detection score greater than 0.3f
+                                            for (int n = 0; n < selectedIndices.size(); n++) {
+                                                Integer selectedIndex = selectedIndices.getInt(n);
+                                                float detectionScore = selectedScores.getFloat(n);
+                                                Long classLabel = detectionClassLabels.getLong(selectedIndex);
+                                                //only include those classes with detection score greater than 0.3f
+                                                if (detectionScore > detectionCutOff) {
+                                                    FloatNdArray detectionBox = detectionBoxes.get(selectedIndices.getInt(n));
+                                                    //add class name to temp bufferedimage
+                                                    insertClassesIntoDatabase(imageId, classLabel, detectionBox, detectionScore);
+                                                }
+                                            }
+                                        }
+
+                                    } else {
+                                        for (int n = 0; n < numDetects; n++) {
+                                            Long classLabel = detectionClassLabels.getLong(n);
+                                            //System.out.println(openImagesTreeMap.get(classLabel));
+                                            //put probability and position in outputMap
+                                            float detectionScore = detectionScores.getFloat(n);
+                                            //only include those classes with detection score greater than detectionCutOff
                                             if (detectionScore > detectionCutOff) {
-                                                FloatNdArray detectionBox = detectionBoxes.get(selectedIndices.getInt(n));
+                                                FloatNdArray detectionBox = detectionBoxes.get(n);
                                                 //add class name to temp bufferedimage
                                                 insertClassesIntoDatabase(imageId, classLabel, detectionBox, detectionScore);
                                             }
                                         }
                                     }
                                 }
-
                             } catch (Exception e) {
-                                e.printStackTrace();
+                                stdOutLogger.error(e.getMessage());
                             }
                         }
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        stdOutLogger.error(e.getMessage());
                     }
                 }
             }
@@ -219,8 +244,8 @@ public class OpenImages implements Detector {
      *
      * @param imagePath path to image.
      */
-    public void doResisizedObjectDetection(String imagePath) {
-        doResisizedObjectDetection(imagePath, imgRcnnSize, imgRcnnSize);
+    public void doResisizedObjectDetection(String imagePath, boolean NMS) {
+        doResisizedObjectDetection(imagePath, imgRcnnSize, imgRcnnSize, NMS);
     }
 
     /**
@@ -230,7 +255,7 @@ public class OpenImages implements Detector {
      * @param newHeight new height of object.
      * @param newWidth  new width of object.
      */
-    public void doResisizedObjectDetection(String imagePath, int newHeight, int newWidth) {
+    public void doResisizedObjectDetection(String imagePath, int newHeight, int newWidth, boolean NMS) {
 
         try (Graph g = new Graph(); Session s = new Session(g)) {
 
@@ -275,23 +300,38 @@ public class OpenImages implements Detector {
                                          TFloat32 detectionScores = (TFloat32) result.get("detection_scores").orElseThrow(Exception::new)) {
                                         int numDetects = (int) detectionClasses.size();
                                         if (numDetects > 0) {
-                                            NonMaxSuppression.Options padToMaxOutputSize = NonMaxSuppression.padToMaxOutputSize(false);
-                                            NonMaxSuppression nonMaxSuppression = tf.image.nonMaxSuppression(tf.constant(detectionBoxes),
-                                                    tf.constant(detectionScores), tf.constant(10),
-                                                    tf.constant(0.5f), tf.constant(0.5f), tf.constant(0.0f),
-                                                    padToMaxOutputSize);
+                                            if (NMS) {
+                                                NonMaxSuppression.Options padToMaxOutputSize = NonMaxSuppression.padToMaxOutputSize(false);
+                                                NonMaxSuppression nonMaxSuppression = tf.image.nonMaxSuppression(tf.constant(detectionBoxes),
+                                                        tf.constant(detectionScores), tf.constant(10),
+                                                        tf.constant(0.5f), tf.constant(0.5f), tf.constant(0.0f),
+                                                        padToMaxOutputSize);
 
-                                            try (TInt32 selectedIndices = (TInt32) s.runner().fetch(nonMaxSuppression.selectedIndices()).run().get(0);
-                                                 TFloat32 selectedScores = (TFloat32) s.runner().fetch(nonMaxSuppression.selectedScores()).run().get(0);
-                                                 TInt32 validDetections = (TInt32) s.runner().fetch(nonMaxSuppression.validOutputs()).run().get(0)) {
-                                                //Gather??
-                                                for (int n = 0; n < selectedIndices.size(); n++) {
-                                                    Integer selectedIndex = selectedIndices.getInt(n);
-                                                    float detectionScore = selectedScores.getFloat(n);
-                                                    Long classLabel = detectionClassLabels.getLong(selectedIndex);
+                                                try (TInt32 selectedIndices = (TInt32) s.runner().fetch(nonMaxSuppression.selectedIndices()).run().get(0);
+                                                     TFloat32 selectedScores = (TFloat32) s.runner().fetch(nonMaxSuppression.selectedScores()).run().get(0);
+                                                     TInt32 validDetections = (TInt32) s.runner().fetch(nonMaxSuppression.validOutputs()).run().get(0)) {
+                                                    //Gather??
+                                                    for (int n = 0; n < selectedIndices.size(); n++) {
+                                                        Integer selectedIndex = selectedIndices.getInt(n);
+                                                        float detectionScore = selectedScores.getFloat(n);
+                                                        Long classLabel = detectionClassLabels.getLong(selectedIndex);
+                                                        //only include those classes with detection score greater than 0.3f
+                                                        if (detectionScore > detectionCutOff) {
+                                                            FloatNdArray detectionBox = detectionBoxes.get(selectedIndices.getInt(n));
+                                                            //add class name to temp bufferedimage
+                                                            insertClassesIntoDatabase(imageId, classLabel, detectionBox, detectionScore);
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                for (int n = 0; n < numDetects; n++) {
+                                                    Long classLabel = detectionClassLabels.getLong(n);
+                                                    //System.out.println(openImagesTreeMap.get(classLabel));
+                                                    //put probability and position in outputMap
+                                                    float detectionScore = detectionScores.getFloat(n);
                                                     //only include those classes with detection score greater than 0.3f
-                                                    if (detectionScore > detectionCutOff) {
-                                                        FloatNdArray detectionBox = detectionBoxes.get(selectedIndices.getInt(n));
+                                                    if (detectionScore > 0.3f) {
+                                                        FloatNdArray detectionBox = detectionBoxes.get(n);
                                                         //add class name to temp bufferedimage
                                                         insertClassesIntoDatabase(imageId, classLabel, detectionBox, detectionScore);
                                                     }
@@ -299,11 +339,11 @@ public class OpenImages implements Detector {
                                             }
                                         }
                                     } catch (Exception e) {
-                                        e.printStackTrace();
+                                        stdOutLogger.error(e.getMessage());
                                     }
                                 }
                             } catch (IOException e) {
-                                e.printStackTrace();
+                                stdOutLogger.error(e.getMessage());
                             }
                         }
                     }
@@ -320,29 +360,20 @@ public class OpenImages implements Detector {
      * @return the new id
      */
     public long insertImageIntoDatabase(String imageName, long[] shapeArray) {
-        PreparedStatement pstmt = null;
+        Jdbi jdbi = JdbiBridge.createSqliteJdbiConnection("openimagephotoobjects.db");
+        jdbi.installPlugin(new SqlObjectPlugin());
+        ImageBean imageBean = new ImageBean();
+        imageBean.setImageName(imageName);
+        imageBean.setWidth(shapeArray[1]);
+        imageBean.setHeight(shapeArray[0]);
         long imageId = nullId;
         try {
-            pstmt = connection.prepareStatement("insert into images (imagename, width, height) values (?, ?, ?)");
-            pstmt.setString(1, imageName);
-            pstmt.setLong(2, shapeArray[1]);
-            pstmt.setLong(3, shapeArray[0]);
-            pstmt.executeUpdate();
-            ResultSet rs = pstmt.getGeneratedKeys();
-            if (rs.next()) {
-                imageId = rs.getLong(1);
-            }
-        } catch (SQLException throwables) {
-            throwables.printStackTrace();
-        } finally {
-            if (pstmt != null) {
-                try {
-                    pstmt.close();
-                } catch (SQLException throwables) {
-                    throwables.printStackTrace();
-                }
-            }
+            OpenImagesJdbiInterface jdbiInterface = jdbi.onDemand(OpenImagesJdbiInterface.class);
+            imageId = jdbiInterface.insertImage(imageBean);
+        } catch (Exception e){
+            stdOutLogger.error(e.getMessage());
         }
+
         return imageId;
     }
 
@@ -355,29 +386,19 @@ public class OpenImages implements Detector {
      * @param score        associated detection score
      */
     public void insertClassesIntoDatabase(long imageId, float classId, FloatNdArray detectionBox, float score) {
-        PreparedStatement pstmt = null;
-        try {
-            pstmt = connection.prepareStatement("insert into openimagephotoobjects (id, imageid, x1, y1, x2, y2, score) values (?, ?, ?, ?, ?, ?, ?)");
-            pstmt.setFloat(1, classId);
-            pstmt.setLong(2, imageId);
-            pstmt.setFloat(3, detectionBox.getFloat(1));
-            pstmt.setFloat(4, detectionBox.getFloat(0));
-            pstmt.setFloat(5, detectionBox.getFloat(3));
-            pstmt.setFloat(6, detectionBox.getFloat(2));
-            pstmt.setFloat(7, score);
-            pstmt.addBatch();
-            pstmt.executeBatch();
-        } catch (SQLException throwables) {
-            throwables.printStackTrace();
-        } finally {
-            if (pstmt != null) {
-                try {
-                    pstmt.close();
-                } catch (SQLException throwables) {
-                    throwables.printStackTrace();
-                }
-            }
-        }
+        Jdbi jdbi = JdbiBridge.createSqliteJdbiConnection("openimagephotoobjects.db");
+
+        jdbi.installPlugin(new SqlObjectPlugin());
+        ObjectBean objectBean = new ObjectBean();
+        objectBean.setClassId(classId);
+        objectBean.setImageId(imageId);
+        objectBean.setX1(detectionBox.getFloat(1));
+        objectBean.setY1(detectionBox.getFloat(0));
+        objectBean.setX2(detectionBox.getFloat(3));
+        objectBean.setY2(detectionBox.getFloat(2));
+        objectBean.setScore(score);
+        OpenImagesJdbiInterface jdbiInterface = jdbi.onDemand(OpenImagesJdbiInterface.class);
+        jdbiInterface.insertObject(objectBean);
     }
 
     /**
@@ -388,9 +409,21 @@ public class OpenImages implements Detector {
      * @throws IOException
      */
     public static void main(String[] params) throws SQLException, IOException {
+        String selDir = System.getProperty("user.dir") + File.separator;
+        GUIThread guiThread = new GUIThread("open", selDir);
+        try {
+            SwingUtilities.invokeAndWait(guiThread);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } catch (InvocationTargetException e) {
+            e.printStackTrace();
+        }
+
+        String dirName = guiThread.getFilePath() + File.separator;
+        //System.out.println(dirName);
+
         OpenImages lfr = new OpenImages();
         boolean doResize = false;
-        String dirName = "D:\\Users\\theke\\Pictures\\Wallington with Eli April 2022\\";
         try (Connection connection = SqlLiteBridge.createSqliteConnection("openimagephotoobjects.db");
              Stream<Path> stream = Files.walk(Paths.get(dirName), 1)
         ) {
@@ -403,11 +436,12 @@ public class OpenImages implements Detector {
             for (String imagePath : fileSet) {
                 if (imagePath.toLowerCase().endsWith(".jpg")) {
                     if (doResize)
-                        lfr.doResisizedObjectDetection(dirName + imagePath, 1024, 1024);
+                        lfr.doResisizedObjectDetection(dirName + imagePath, 1024, 1024, false);
                     else
-                        lfr.doObjectDetection(dirName + imagePath);
+                        lfr.doObjectDetection(dirName + imagePath, false);
                 }
             }
         }
+        System.exit(0);
     }
 }

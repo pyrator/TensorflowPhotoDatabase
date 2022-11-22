@@ -1,8 +1,15 @@
 package uk.khall.sql;
 
 import org.jdbi.v3.core.Jdbi;
+
+import uk.khall.ui.FileChooser;
+import uk.khall.ui.GUIThread;
 import uk.khall.ui.interact.PhotoObjectProperties;
 
+import javax.swing.JFrame;
+import javax.swing.SwingUtilities;
+import java.io.File;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,7 +23,7 @@ public class OpenImageJdbiUtils {
                 .list());
         return new ArrayList<>(classTotals);
     }
-    public static ArrayList<PhotoObjectProperties> getPhotObjectProperties(String imageName) {
+    public static ArrayList<PhotoObjectProperties> getPhotoObjectProperties(String imageName) {
         Jdbi jdbi =  JdbiBridge.createSqliteJdbiConnection("openimagephotoobjects.db");
         String queryString ="select \n" +
                 "images.imagename as imageName, \n" +
@@ -86,6 +93,15 @@ public class OpenImageJdbiUtils {
                 .list());
         return new ArrayList<>(files);
     }
+    public static void deleteFolder(String folderName){
+        Jdbi jdbi =  JdbiBridge.createSqliteJdbiConnection("openimagephotoobjects.db");
+
+        String queryString = "delete from images where imagename like ? " ;
+        jdbi.withHandle(handle -> handle.createUpdate(queryString)
+                .bind(0, folderName+"%")
+                .execute());
+    }
+
     public static void main(String[] params){
         ArrayList<String> folders = getFolders();
         for (String folder : folders) {
@@ -99,14 +115,21 @@ public class OpenImageJdbiUtils {
                 System.out.println(folder + " : " + file);
             }*/
         }
-        String folder = "D:\\Users\\theke\\Pictures\\Wallington with Eli April 2022\\";
+
+/*        String folder = folders.get(1);
         ArrayList<String> files = getFilenamesInFolder(folder);
         for (String file : files ){
             System.out.println(folder + " : " + file);
         }
-        ArrayList<PhotoObjectProperties> properties = getPhotObjectProperties(folder + "P1040095.JPG");
+
+        ArrayList<ClassFile> classFilesList = getClassesInFolder(folder);
+        for (ClassFile classFiles : classFilesList) {
+            System.out.println(folder + " " + classFiles.getImageName() + " " + classFiles.getClassName());
+        }
+        ArrayList<PhotoObjectProperties> properties = getPhotoObjectProperties(folder + "P1030136.JPG");
         for (PhotoObjectProperties property : properties){
             System.out.println(property);
-        }
+        }*/
+        /*deleteFolder(folder);*/
     }
 }
