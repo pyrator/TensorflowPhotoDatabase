@@ -54,14 +54,14 @@ public class ViewOpenImageClass implements ViewImage {
                         graphics2D.setFont(font);
                         graphics2D.drawString(property.className + " " + property.classScore, property.pointX1, (property.pointY1 > 5 ? property.pointY1 - 5 : property.pointY1 + 10));
                     } else if (rotation == 6 ){
-                        System.out.println(property);
-                        graphics2D.drawRect(displayImageWidth - property.pointY2,displayImageHeight - property.pointX2,
+                        System.out.println(property + ":" + imageWidth + ": " + imageHeight + ": " + displayImageWidth+ ": " + displayImageHeight);
+                        graphics2D.drawRect(displayImageWidth - (property.pointY1 + (property.pointY2 - property.pointY1)) , property.pointX1,
                                 property.pointY2 - property.pointY1,
                                 property.pointX2 - property.pointX1);
                         Font font = new Font(Font.SANS_SERIF, Font.BOLD, 24);
                         graphics2D.setPaint(Color.CYAN);
                         graphics2D.setFont(font);
-                        graphics2D.drawString(property.className + " " + property.classScore, displayImageWidth - property.pointY2, (property.pointX1 > 5 ? property.pointX1 - 5 : property.pointX1 + 10));
+                        graphics2D.drawString(property.className + " " + property.classScore, displayImageWidth - (property.pointY1 + (property.pointY2 - property.pointY1)), (property.pointX1 > 5 ? property.pointX1 - 5 : property.pointX1 + 10));
                     } else if (rotation == 8 ){
                         graphics2D.drawRect(property.pointY1, property.pointX1,
                                 property.pointY2 - property.pointY1,
@@ -82,7 +82,7 @@ public class ViewOpenImageClass implements ViewImage {
 
                 }
             }
-            BufferedImage resizedImage = ImageUtils.resizeImage(bufferedImage, displayImageWidth, displayImageHeight, comp);
+            BufferedImage resizedImage = ImageUtils.resizeImage(bufferedImage, imageHeight, imageWidth, comp);
             ImageDisplayer imageDisplayer = new ImageDisplayer(resizedImage.getWidth(), resizedImage.getHeight());
             imageDisplayer.setImage(resizedImage);
             imageDisplayer.setVisible(true);
