@@ -54,7 +54,6 @@ public class ViewOpenImageClass implements ViewImage {
                         graphics2D.setFont(font);
                         graphics2D.drawString(property.className + " " + property.classScore, property.pointX1, (property.pointY1 > 5 ? property.pointY1 - 5 : property.pointY1 + 10));
                     } else if (rotation == 6 ){
-                        System.out.println(property + ":" + imageWidth + ": " + imageHeight + ": " + displayImageWidth+ ": " + displayImageHeight);
                         graphics2D.drawRect(displayImageWidth - (property.pointY1 + (property.pointY2 - property.pointY1)) , property.pointX1,
                                 property.pointY2 - property.pointY1,
                                 property.pointX2 - property.pointX1);
@@ -82,7 +81,11 @@ public class ViewOpenImageClass implements ViewImage {
 
                 }
             }
-            BufferedImage resizedImage = ImageUtils.resizeImage(bufferedImage, imageHeight, imageWidth, comp);
+            BufferedImage resizedImage = null;
+            if (rotation == 6 || rotation == 8)
+                resizedImage = ImageUtils.resizeImage(bufferedImage, imageHeight, imageWidth, comp);
+            else
+                resizedImage = ImageUtils.resizeImage(bufferedImage, imageWidth, imageHeight, comp);
             ImageDisplayer imageDisplayer = new ImageDisplayer(resizedImage.getWidth(), resizedImage.getHeight());
             imageDisplayer.setImage(resizedImage);
             imageDisplayer.setVisible(true);
