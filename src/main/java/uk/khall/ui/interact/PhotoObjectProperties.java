@@ -67,6 +67,6 @@ public class PhotoObjectProperties {
     }
 
     public String toString(){
-        return imageName + ":" + className+":"+classScore;
+        return imageName + ":" + className+":"+classScore + ":"+pointX1 + ":"+pointY1+ ":"+pointX2 + ":"+pointY2;
     }
 }

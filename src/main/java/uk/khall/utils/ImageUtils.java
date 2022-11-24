@@ -1,6 +1,8 @@
 package uk.khall.utils;
 
 import java.awt.*;
+import java.awt.geom.AffineTransform;
+import java.awt.image.AffineTransformOp;
 import java.awt.image.BufferedImage;
 
 public class ImageUtils {
@@ -35,5 +37,58 @@ public class ImageUtils {
         g.drawImage(imageIn, 0, 0, null);
 
         return bufferedImageOut;
+    }
+
+    public static void rotate(BufferedImage from, BufferedImage to, double rotate)
+    {
+        // rotate around the center
+        AffineTransform trans
+                = AffineTransform.getRotateInstance(rotate,
+                from.getWidth()/2, from.getHeight()/2);
+        AffineTransformOp op = new AffineTransformOp(trans,
+                AffineTransformOp.TYPE_BILINEAR);
+        op.filter(from, to);
+    }
+    public static void rotate(Graphics2D g2d, BufferedImage img, double rotate)
+    {
+        // rotate around the center
+        AffineTransform trans
+                = AffineTransform.getRotateInstance(rotate,
+                img.getWidth()/2, img.getHeight()/2);
+        g2d.drawImage(img, trans, null);
+    }
+
+    public static BufferedImage rotateImage(BufferedImage image, int quadrants) {
+
+        int w0 = image.getWidth();
+        int h0 = image.getHeight();
+        int w1 = w0;
+        int h1 = h0;
+        int centerX = w0 / 2;
+        int centerY = h0 / 2;
+
+        if (quadrants % 2 == 1) {
+            w1 = h0;
+            h1 = w0;
+        }
+
+        if (quadrants % 4 == 1) {
+            centerX = h0 / 2;
+            centerY = h0 / 2;
+        } else if (quadrants % 4 == 3) {
+            centerX = w0 / 2;
+            centerY = w0 / 2;
+        }
+
+        AffineTransform affineTransform = new AffineTransform();
+        affineTransform.setToQuadrantRotation(quadrants, centerX, centerY);
+        AffineTransformOp opRotated = new AffineTransformOp(affineTransform,
+                AffineTransformOp.TYPE_BILINEAR);
+        BufferedImage transformedImage = new BufferedImage(w1, h1,
+                image.getType());
+        transformedImage = opRotated.filter(image, transformedImage);
+
+        return transformedImage;
+
     }
 }

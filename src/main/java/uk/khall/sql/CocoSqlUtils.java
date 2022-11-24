@@ -1,5 +1,6 @@
 package uk.khall.sql;
 
+import org.jdbi.v3.core.Jdbi;
 import uk.khall.ui.interact.PhotoObjectProperties;
 
 import java.sql.Connection;
@@ -7,6 +8,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.TreeMap;
 
 public class CocoSqlUtils {
@@ -129,8 +131,34 @@ public class CocoSqlUtils {
         }
         return classTotals;
     }
+    public static ArrayList<String> getFolders(){
+        ArrayList<String> files = new ArrayList<>();
+        try (Connection connection = SqlLiteBridge.createSqliteConnection("photoobjects.db")) {
+            String queryString = "select distinct rtrim(imagename, replace(imagename, '\\', '')) as folderName from images";
+            PreparedStatement pstmt;
+
+            pstmt = connection.prepareStatement(queryString);
+
+            ResultSet rs = pstmt.executeQuery();
+            while (rs.next()) {
+                //Retrieve from DB
+                String folderName = rs.getString(1);
+                files.add(folderName);
+            }
+            pstmt.close();
+
+        } catch (SQLException sqle) {
+            sqle.printStackTrace();
+        }
+        return files;
+    }
+
     public static void main (String[] params){
-        String folderName = "D:\\Users\\theke\\Pictures\\Colchester Sept 2020\\";
+        ArrayList<String> folders = getFolders();
+        for (String folder : folders){
+            System.out.println(folder);
+        }
+        String folderName = "D:\\Users\\theke\\Pictures\\Lindisfarne and Low Hauxley Nov 2022\\";
         TreeMap<String, Integer> classTotals =
                 CocoSqlUtils.getClassedInFolder( folderName);
         for (String key : classTotals.keySet()){

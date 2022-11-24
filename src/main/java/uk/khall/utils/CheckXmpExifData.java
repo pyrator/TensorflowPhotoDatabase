@@ -7,41 +7,30 @@ import org.apache.commons.imaging.Imaging;
 import org.apache.commons.imaging.common.ImageMetadata;
 import org.apache.commons.imaging.formats.jpeg.JpegImageMetadata;
 
+import org.apache.commons.imaging.formats.tiff.TiffField;
 import org.apache.commons.imaging.formats.tiff.TiffImageMetadata;
 
+import org.apache.commons.imaging.formats.tiff.constants.TiffDirectoryType;
+import org.apache.commons.imaging.formats.tiff.constants.TiffTagConstants;
+import org.apache.commons.imaging.formats.tiff.taginfos.TagInfo;
+import org.apache.commons.imaging.formats.tiff.taginfos.TagInfoShort;
 import org.apache.commons.imaging.formats.tiff.write.TiffOutputDirectory;
 import org.apache.commons.imaging.formats.tiff.write.TiffOutputField;
 import org.apache.commons.imaging.formats.tiff.write.TiffOutputSet;
-
+import static org.apache.commons.imaging.formats.tiff.constants.TiffTagConstants.*;
 
 import java.io.*;
 
 import java.util.List;
+import java.util.Objects;
 
 
 /**
  * Created by Keith on 09/07/2016.
  */
 public class CheckXmpExifData {
-    /*
-        https://google-developers.appspot.com/streetview/spherical-metadata
 
-    •-xmp:ProjectionType=equirectangular
-    •-xmp:UsePanoramaViewer=True
-    •-xmp:CroppedAreaImageWidthPixels=6000
-    •-xmp:CroppedAreaImageHeightPixels=3000
-    •-xmp:FullPanoWidthPixels=6000
-    •-xmp:FullPanoHeightPixels=3000
-    •-xmp:CroppedAreaLeftPixels=0
-    •-xmp:CroppedAreaTopPixels=0
-    •-xmp:PoseHeadingDegrees=0.0
-    •-xmp:InitialViewHeadingDegrees=0
-    •-xmp:InitialViewPitchDegrees=0
-    •-xmp:InitialViewRollDegrees=0
-    •-xmp:InitialHorizontalFOVDegrees=90.0
-
-     */
-    public void viewExifMetadata(final File jpegImageFile)
+    public static void viewExifMetadata(final File jpegImageFile)
             throws IOException, ImageReadException, ImageWriteException {
         OutputStream os = null;
         boolean canThrow = false;
@@ -117,23 +106,61 @@ public class CheckXmpExifData {
     }
 
 
-
-
-
-
-    public static void main(String[] params){
-        CheckXmpExifData addXmpExifData = new CheckXmpExifData();
+    /**
+     * Retrieve the orientation of a file from the EXIF data.
+     *
+     * @param   imageFile   The image file.
+     * @return  The orientation value ID.
+     */
+    public static int getExifOrientationId(final File imageFile) {
 
         try {
-            addXmpExifData.viewExifMetadata(new File("D:\\Users\\theke\\flashair\\upload\\P1300415.JPG"));
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (ImageReadException e) {
-            e.printStackTrace();
-        } catch (ImageWriteException e) {
-            e.printStackTrace();
-        }
 
+            final ImageMetadata tmpMetadata = Imaging.getMetadata(imageFile);
+            TiffImageMetadata tmpTiffImageMetadata;
+
+            if (tmpMetadata instanceof JpegImageMetadata) {
+
+                tmpTiffImageMetadata = ((JpegImageMetadata) tmpMetadata).getExif();
+            } else if (tmpMetadata instanceof TiffImageMetadata) {
+
+                tmpTiffImageMetadata = (TiffImageMetadata) tmpMetadata;
+            } else {
+
+                return TiffTagConstants.ORIENTATION_VALUE_HORIZONTAL_NORMAL;
+            }
+
+            TiffField tmpTiffField = tmpTiffImageMetadata.findField(TiffTagConstants.TIFF_TAG_ORIENTATION);
+
+            if (!Objects.isNull(tmpTiffField)) {
+
+                return tmpTiffField.getIntValue();
+            } else {
+
+                // https://www.loc.gov/preservation/digital/formats/content/tiff_tags.shtml
+                TagInfo tmpTagInfo = new TagInfoShort("Orientation", 274, TiffDirectoryType.TIFF_DIRECTORY_IFD0);
+                tmpTiffField = tmpTiffImageMetadata.findField(tmpTagInfo);
+
+                if (!Objects.isNull(tmpTiffField)) {
+
+                    return tmpTiffField.getIntValue();
+                } else {
+
+                    return TiffTagConstants.ORIENTATION_VALUE_HORIZONTAL_NORMAL;
+                }
+            }
+        } catch (Exception e) {
+
+            return TiffTagConstants.ORIENTATION_VALUE_HORIZONTAL_NORMAL;
+        }
     }
+
+
+
+public static void main (String[] params){
+    System.out.println(getExifOrientationId(new File("D:\\Users\\theke\\Pictures\\Bolam Lake Sep 2020\\P1010526.JPG")));
+    System.out.println(getExifOrientationId(new File("D:\\Users\\theke\\Pictures\\Bolam Lake Sep 2020\\P1010516.JPG")));
+}
+
 
 }
