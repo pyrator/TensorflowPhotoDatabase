@@ -18,8 +18,8 @@ public interface Detector {
 
     public void setConnection(Connection connection);
     public void doObjectDetection(String imagePath, boolean NMS);
-    public void doResisizedObjectDetection(String imagePath, boolean NMS);
-    public void doResisizedObjectDetection(String imagePath, int newHeight, int newWidth, boolean NMS);
+    public void doResizedObjectDetection(String imagePath, boolean NMS);
+    public void doResizedObjectDetection(String imagePath, int newHeight, int newWidth, boolean NMS);
     /**
      * return a 4D tensor from 3D tensor
      *

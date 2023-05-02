@@ -200,15 +200,15 @@ public class FasterRcnn implements Detector {
      * @param imagePath
      * @param NMS
      */
-    public void doResisizedObjectDetection(String imagePath, boolean NMS) {
-        doResisizedObjectDetection(imagePath, imgRcnnSize, imgRcnnSize, NMS);
+    public void doResizedObjectDetection(String imagePath, boolean NMS) {
+        doResizedObjectDetection(imagePath, imgRcnnSize, imgRcnnSize, NMS);
     }
     /**
      * Do detection on resized images
      * @param imagePath
      * @param NMS
      */
-    public void doResisizedObjectDetection(String imagePath, int newHeight, int newWidth, boolean NMS) {
+    public void doResizedObjectDetection(String imagePath, int newHeight, int newWidth, boolean NMS) {
         try (Graph g = new Graph(); Session s = new Session(g)) {
 
             Ops tf = Ops.create(g);
@@ -401,7 +401,7 @@ public class FasterRcnn implements Detector {
             for (String imagePath : fileSet) {
                 if (imagePath.toLowerCase().endsWith(".jpg")) {
                     if (doResize)
-                        lfr.doResisizedObjectDetection(dirName + imagePath, false);
+                        lfr.doResizedObjectDetection(dirName + imagePath, false);
                     else
                         lfr.doObjectDetection(dirName + imagePath, false);
                 }

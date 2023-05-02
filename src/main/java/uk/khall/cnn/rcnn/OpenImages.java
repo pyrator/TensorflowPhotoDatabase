@@ -35,11 +35,9 @@ import org.tensorflow.types.TInt32;
 import org.tensorflow.types.TInt64;
 import org.tensorflow.types.TString;
 import org.tensorflow.types.TUint8;
-import uk.khall.ui.FileChooser;
 import uk.khall.ui.GUIThread;
 import uk.khall.utils.ModelHubUtils;
 
-import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 import java.io.File;
 import java.io.IOException;
@@ -49,8 +47,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 
 import java.util.HashMap;
@@ -243,8 +239,8 @@ public class OpenImages implements Detector {
      *
      * @param imagePath path to image.
      */
-    public void doResisizedObjectDetection(String imagePath, boolean NMS) {
-        doResisizedObjectDetection(imagePath, imgRcnnSize, imgRcnnSize, NMS);
+    public void doResizedObjectDetection(String imagePath, boolean NMS) {
+        doResizedObjectDetection(imagePath, imgRcnnSize, imgRcnnSize, NMS);
     }
 
     /**
@@ -254,7 +250,7 @@ public class OpenImages implements Detector {
      * @param newHeight new height of object.
      * @param newWidth  new width of object.
      */
-    public void doResisizedObjectDetection(String imagePath, int newHeight, int newWidth, boolean NMS) {
+    public void doResizedObjectDetection(String imagePath, int newHeight, int newWidth, boolean NMS) {
 
         try (Graph g = new Graph(); Session s = new Session(g)) {
 
@@ -435,7 +431,7 @@ public class OpenImages implements Detector {
             for (String imagePath : fileSet) {
                 if (imagePath.toLowerCase().endsWith(".jpg")) {
                     if (doResize)
-                        lfr.doResisizedObjectDetection(dirName + imagePath, 1024, 1024, false);
+                        lfr.doResizedObjectDetection(dirName + imagePath, 1024, 1024, false);
                     else
                         lfr.doObjectDetection(dirName + imagePath, false);
                 }
