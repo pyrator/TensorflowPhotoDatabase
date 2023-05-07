@@ -11,7 +11,10 @@ import javax.swing.SwingUtilities;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 
 public class OpenImageJdbiUtils {
@@ -76,6 +79,15 @@ public class OpenImageJdbiUtils {
                 .list());
         return new ArrayList<>(files);
     }
+    public static Stream<String> getFolderStream(){
+        Jdbi jdbi =  JdbiBridge.createSqliteJdbiConnection("openimagephotoobjects.db");
+        String queryString = "select distinct rtrim(imagename, replace(imagename, '\\', '')) from images";
+        List<String> files =  jdbi.withHandle(handle -> handle.createQuery(queryString)
+                .mapTo(String.class)
+                .list());
+        return files.stream();
+    }
+
     public static ArrayList<String> getFolders(){
         Jdbi jdbi =  JdbiBridge.createSqliteJdbiConnection("openimagephotoobjects.db");
         String queryString = "select distinct rtrim(imagename, replace(imagename, '\\', '')) from images";
@@ -103,9 +115,12 @@ public class OpenImageJdbiUtils {
     }
 
     public static void main(String[] params){
-        ArrayList<String> folders = getFolders();
-        for (String folder : folders) {
-            System.out.println("folder " + folder);
+        //ArrayList<String> folders = getFolders();
+        Stream<String> folders = getFolderStream();
+        folders.sorted(Comparator.naturalOrder())
+                .collect(Collectors.toList()).forEach(folder -> System.out.println("folder " + folder));
+        //for (String folder : folders) {
+        //    System.out.println("folder " + folder);
 /*            ArrayList<ClassFile> classFilesList = getClassesInFolder(folder);
             for (ClassFile classFiles : classFilesList) {
                 System.out.println(folder + " " + classFiles.getImageName() + " " + classFiles.getClassName());
@@ -114,7 +129,7 @@ public class OpenImageJdbiUtils {
             for (String file : files ){
                 System.out.println(folder + " : " + file);
             }*/
-        }
+       // }
 
 /*        String folder = folders.get(1);
         ArrayList<String> files = getFilenamesInFolder(folder);
